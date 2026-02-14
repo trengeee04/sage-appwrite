@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAGE ChatApp - Professional Chat Application</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Authentication Container -->
+    <div id="authContainer" class="auth-container active">
+        <div class="auth-wrapper">
+            <!-- Login Form -->
+            <div id="loginForm" class="form-container active">
+                <div class="form-header">
+                    <div class="logo">
+                        <i class="fas fa-comments"></i>
+                        <span>SAGE</span>
+                    </div>
+                    <h2>Welcome Back</h2>
+                    <p>Connect with your community</p>
+                </div>
+
+                <form id="loginFormElement" class="auth-form">
+                    <div class="form-group">
+                        <label for="loginUsername">
+                            <i class="fas fa-user"></i>
+                            Username
+                        </label>
+                        <input 
+                            type="text" 
+                            id="loginUsername" 
+                            placeholder="Enter your username"
+                            required
+                        >
+                        <div class="input-focus-effect"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="loginPassword">
+                            <i class="fas fa-lock"></i>
+                            Password
+                        </label>
+                        <div class="password-input-wrapper">
+                            <input 
+                                type="password" 
+                                id="loginPassword" 
+                                placeholder="Enter your password"
+                                required
+                            >
+                            <button type="button" class="toggle-password" onclick="togglePasswordVisibility('loginPassword')">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                        <div class="input-focus-effect"></div>
+                    </div>
+
+                    <button type="submit" class="btn-primary">
+                        <span>Sign In</span>
+                        <i class="fas fa-arrow-right"></i>
+                    </button>
+                </form>
+
+                <div class="form-footer">
+                    <p>Don't have an account? 
+                        <button type="button" class="link-button" onclick="switchToRegister()">
+                            Create one
+                        </button>
+                    </p>
+                </div>
+            </div>
+
+            <!-- Register Form -->
+            <div id="registerForm" class="form-container">
+                <div class="form-header">
+                    <div class="logo">
+                        <i class="fas fa-comments"></i>
+                        <span>SAGE</span>
+                    </div>
+                    <h2>Join SAGE</h2>
+                    <p>Start chatting with communities today</p>
+                </div>
+
+                <form id="registerFormElement" class="auth-form">
+                    <div class="form-group">
+                        <label for="registerName">
+                            <i class="fas fa-user-plus"></i>
+                            Full Name
+                        </label>
+                        <input 
+                            type="text" 
+                            id="registerName" 
+                            placeholder="Your full name"
+                            required
+                        >
+                        <div class="input-focus-effect"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="registerUsername">
+                            <i class="fas fa-at"></i>
+                            Username
+                        </label>
+                        <input 
+                            type="text" 
+                            id="registerUsername" 
+                            placeholder="Choose a username"
+                            required
+                        >
+                        <div class="input-focus-effect"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="registerPassword">
+                            <i class="fas fa-lock"></i>
+                            Password
+                        </label>
+                        <div class="password-input-wrapper">
+                            <input 
+                                type="password" 
+                                id="registerPassword" 
+                                placeholder="Create a strong password"
+                                required
+                            >
+                            <button type="button" class="toggle-password" onclick="togglePasswordVisibility('registerPassword')">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                        <div class="password-strength-meter">
+                            <div class="strength-bar"></div>
+                            <span class="strength-text">Password strength</span>
+                        </div>
+                        <div class="input-focus-effect"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="registerConfirmPassword">
+                            <i class="fas fa-shield-alt"></i>
+                            Confirm Password
+                        </label>
+                        <div class="password-input-wrapper">
+                            <input 
+                                type="password" 
+                                id="registerConfirmPassword" 
+                                placeholder="Confirm your password"
+                                required
+                            >
+                            <button type="button" class="toggle-password" onclick="togglePasswordVisibility('registerConfirmPassword')">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                        <div class="input-focus-effect"></div>
+                    </div>
+
+                    <button type="submit" class="btn-primary">
+                        <span>Create Account</span>
+                        <i class="fas fa-check"></i>
+                    </button>
+                </form>
+
+                <div class="form-footer">
+                    <p>Already have an account? 
+                        <button type="button" class="link-button" onclick="switchToLogin()">
+                            Sign in
+                        </button>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Decorative Elements -->
+        <div class="auth-decorations">
+            <div class="shape shape-1"></div>
+            <div class="shape shape-2"></div>
+            <div class="shape shape-3"></div>
+        </div>
+    </div>
+
+    <!-- Chat Container -->
+    <div id="chatContainer" class="chat-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">
+                    <i class="fas fa-comments"></i>
+                    <span>SAGE</span>
+                </div>
+                <div class="sidebar-actions">
+                    <button class="sidebar-btn" title="Create Channel" onclick="showCreateChannelModal()">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                    <button class="sidebar-btn" title="Settings" onclick="showSettingsModal()">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="sidebar-search">
+                <i class="fas fa-search"></i>
+                <input type="text" placeholder="Search channels..." id="searchChannels">
+            </div>
+
+            <div class="channels-section">
+                <h3 class="section-title">Direct Messages</h3>
+                <div id="directMessages" class="channels-list"></div>
+            </div>
+
+            <div class="channels-section">
+                <h3 class="section-title">Channels</h3>
+                <div id="channelsList" class="channels-list"></div>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="chat-main">
+            <!-- Header -->
+            <header class="chat-header">
+                <div class="header-left">
+                    <h1 id="channelName">Select a channel</h1>
+                    <p id="channelDescription" class="channel-description"></p>
+                </div>
+                <div class="header-actions">
+                    <button class="header-btn" title="Call" onclick="initiateCall()">
+                        <i class="fas fa-phone"></i>
+                    </button>
+                    <button class="header-btn" title="Video Call" onclick="initiateVideoCall()">
+                        <i class="fas fa-video"></i>
+                    </button>
+                    <button class="header-btn" title="Member List" onclick="toggleMemberList()">
+                        <i class="fas fa-users"></i>
+                    </button>
+                    <button class="header-btn" title="Info" onclick="toggleChannelInfo()">
+                        <i class="fas fa-info-circle"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Messages Area -->
+            <div class="messages-area" id="messagesArea">
+                <div class="messages-welcome">
+                    <div class="welcome-icon">
+                        <i class="fas fa-comments"></i>
+                    </div>
+                    <h2>Welcome to SAGE</h2>
+                    <p>Select a channel to start chatting</p>
+                </div>
+            </div>
+
+            <!-- Message Input -->
+            <div class="message-input-area">
+                <div class="input-actions">
+                    <button class="action-btn" title="Attach File" onclick="attachFile()">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
+                    <button class="action-btn" title="Emoji" onclick="showEmojiPicker()">
+                        <i class="fas fa-smile"></i>
+                    </button>
+                </div>
+                <div class="input-wrapper">
+                    <input 
+                        type="text" 
+                        id="messageInput" 
+                        placeholder="Type your message here..."
+                        class="message-input"
+                    >
+                    <div class="input-focus-line"></div>
+                </div>
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </main>
+
+        <!-- Right Sidebar - Member List & Info -->
+        <aside class="right-sidebar" id="rightSidebar">
+            <div class="sidebar-header">
+                <h2>Members</h2>
+                <button class="close-btn" onclick="toggleMemberList()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="members-list" id="membersList"></div>
+        </aside>
+    </div>
+
+    <!-- User Profile Menu -->
+    <div class="user-menu" id="userMenu">
+        <div class="user-menu-header">
+            <div class="user-avatar"></div>
+            <div class="user-info">
+                <h4 id="profileUsername"></h4>
+                <p class="status">Online</p>
+            </div>
+        </div>
+        <div class="user-menu-items">
+            <button class="menu-item" onclick="showProfile()">
+                <i class="fas fa-user"></i> Profile
+            </button>
+            <button class="menu-item" onclick="showSettings()">
+                <i class="fas fa-cog"></i> Settings
+            </button>
+            <button class="menu-item" onclick="showAbout()">
+                <i class="fas fa-info-circle"></i> About
+            </button>
+            <hr>
+            <button class="menu-item logout" onclick="logout()">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </button>
+        </div>
+    </div>
+
+    <!-- Floating Action Button -->
+    <button class="fab-menu" id="fabMenu" onclick="toggleUserMenu()">
+        <i class="fas fa-user-circle"></i>
+    </button>
+
+    <!-- Notifications -->
+    <div id="notificationContainer" class="notification-container"></div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="loading-spinner">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Appwrite SDK -->
+    <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/appwrite@latest/dist/appwrite.min.js"></script>
+
+    <!-- Scripts -->
+    <script src="js/appwrite-config.js"></script>
+    <script src="js/auth-setup.js"></script>
+    <script src="js/auth-appwrite.js"></script>
+    <script src="js/chat-appwrite.js"></script>
+</body>
+</html>
