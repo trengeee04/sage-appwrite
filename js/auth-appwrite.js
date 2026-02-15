@@ -3,334 +3,185 @@
 // User management with Appwrite backend
 // ============================================
 
-// Get Query helper when it's available
-function getQuery() {
-    if (typeof Query !== 'undefined' && Query) {
-        return Query;
-    }
-    return window.AppwriteQuery?.() || null;
-}
-
 class AuthManager {
     constructor() {
-        this.users = {};
-        this.currentUser = this.loadCurrentUser();
-        this.databases = appwriteService?.getDatabases();
-        this.account = appwriteService?.getAccount();
-        this.waitForAppwrite();
+        this.currentUser = null;
+        this.account = null;
+        this.databases = null;
+        this.init();
     }
 
-    // Wait for Appwrite to be fully initialized
-    async waitForAppwrite() {
-        let retries = 0;
-        while ((!this.databases || !this.account) && retries < 50) {
-            this.databases = appwriteService?.getDatabases();
-            this.account = appwriteService?.getAccount();
-            await new Promise(resolve => setTimeout(resolve, 100));
-            retries++;
-        }
-        if (!this.databases || !this.account) {
-            console.warn('⚠️ Appwrite services not initialized after timeout');
+    async init() {
+        // Wait for Appwrite to be initialized in appwrite-config.js
+        if (window.appwriteAccount && window.appwriteDatabases) {
+            this.account = window.appwriteAccount;
+            this.databases = window.appwriteDatabases;
+            await this.checkSession();
+        } else {
+            // Retry if not yet loaded
+            setTimeout(() => this.init(), 100);
         }
     }
 
-    // Load current logged-in user from localStorage
-    loadCurrentUser() {
-        const stored = localStorage.getItem('sage_current_user');
-        return stored ? JSON.parse(stored) : null;
-    }
-
-    // Save current user to localStorage
-    saveCurrentUser(user) {
-        localStorage.setItem('sage_current_user', JSON.stringify(user));
-        this.currentUser = user;
-    }
-
-    // Hash password using simple crypto (use backend for production)
-    async hashPassword(password) {
+    // Check if user is already logged in
+    async checkSession() {
         try {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(password);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            const user = await this.account.get();
+            this.currentUser = {
+                id: user.$id,
+                name: user.name,
+                email: user.email,
+                username: user.prefs?.username || user.name.toLowerCase().replace(/\s+/g, ''),
+                avatar: user.prefs?.avatar || this.generateAvatar(user.name)
+            };
+
+            console.log('✅ Session restored:', this.currentUser.name);
+            showAuthContainer(false);
+            initializeChat();
         } catch (error) {
-            console.error('Hashing error:', error);
-            // Fallback
-            return 'hashed_' + btoa(password);
+            // 401 is expected if user is not logged in
+            console.log('ℹ️ User not logged in (Guest session)');
+            showAuthContainer(true);
         }
     }
 
-    // Compare password with hash
-    async comparePassword(password, hash) {
+    // Register new user
+    async registerUser(name, username, password, email) {
         try {
-            const newHash = await this.hashPassword(password);
-            return newHash === hash;
-        } catch (error) {
-            console.error('Comparison error:', error);
-            return false;
-        }
-    }
-
-    // Register new user with Appwrite backend
-    async registerUser(name, username, password) {
-        try {
-            // Validation
-            if (!name || !username || !password) {
-                return { success: false, message: 'All fields are required' };
+            if (!email) {
+                // Generate a fake email if not provided (not recommended for prod but fits current UI)
+                email = `${username}@example.com`;
             }
 
-            if (username.length < 3) {
-                return { success: false, message: 'Username must be at least 3 characters' };
-            }
+            // 1. Create Identity
+            const userId = 'unique()';
+            await this.account.create(userId, email, password, name);
 
-            if (password.length < 6) {
-                return { success: false, message: 'Password must be at least 6 characters' };
-            }
+            // 2. Create Session (Login) automatically
+            await this.loginUser(email, password);
 
-            // Check if username already exists in Appwrite
+            // 3. Update Preferences (store username/avatar)
+            const avatar = this.generateAvatar(name);
+            await this.account.updatePrefs({
+                username: username,
+                avatar: avatar
+            });
+
+            // 4. Create User Document in Database (for listing users)
+            // Note: This requires the current user to have write permission to 'users' collection
+            // Or use an Appwrite Function. For frontend-only, this relies on restrictive permissions.
             try {
-                const Query = getQuery();
-                if (Query && this.databases) {
-                    const existingUser = await this.databases.listDocuments(
-                        APPWRITE_CONFIG.databaseId,
-                        APPWRITE_CONFIG.collections.users,
-                        [Query.equal('username', username.toLowerCase())]
-                    );
-                    
-                    if (existingUser.documents.length > 0) {
-                        return { success: false, message: 'Username already exists' };
+                const { ID } = window.Appwrite; // Ensure we have ID available
+
+                // We use the account ID as the document ID for 1:1 mapping
+                await this.databases.createRow({
+                    databaseId: APPWRITE_CONFIG.databaseId,
+                    tableId: APPWRITE_CONFIG.collections.users,
+                    rowId: this.currentUser.id,
+                    data: {
+                        username: username,
+                        name: name,
+                        email: email,
+                        avatar: avatar,
+                        status: 'online',
+                        lastLogin: new Date().toISOString()
                     }
-                }
-            } catch (error) {
-                console.warn('Checking existing user:', error);
+                });
+            } catch (dbError) {
+                console.warn('⚠️ Could not create user document:', dbError);
+                // Non-fatal, auth still works
             }
 
-            // Hash the password
-            const hashedPassword = await this.hashPassword(password);
+            return { success: true, message: 'Account created successfully' };
 
-            // Create user object
-            const userId = 'user_' + Math.random().toString(36).substr(2, 9);
-            const userData = {
-                userId: userId,
-                name: name.trim(),
-                username: username.toLowerCase().trim(),
-                passwordHash: hashedPassword,
-                avatar: this.generateAvatar(name),
-                status: 'offline',
-                createdAt: new Date().toISOString(),
-                lastLogin: null
-            };
-
-            // Save to Appwrite
-            try {
-                if (this.databases) {
-                    const response = await this.databases.createDocument(
-                        APPWRITE_CONFIG.databaseId,
-                        APPWRITE_CONFIG.collections.users,
-                        userId,
-                        userData
-                    );
-
-                    console.log('✅ User registered in Appwrite:', response);
-                }
-            } catch (error) {
-                console.warn('Appwrite registration warning:', error);
-                // Continue even if Appwrite fails
-            }
-
-            // Also store in local cache for quick access
-            this.users[username.toLowerCase()] = userData;
-
-            return {
-                success: true,
-                message: 'Account created successfully',
-                user: { id: userId, name: name, username: username.toLowerCase() }
-            };
         } catch (error) {
             console.error('❌ Registration error:', error);
-            return { success: false, message: 'Registration failed. Please try again.' };
+            return { success: false, message: error.message };
         }
     }
 
     // Login user
-    async loginUser(username, password) {
+    async loginUser(emailOrUsername, password) {
         try {
-            if (!username || !password) {
-                return { success: false, message: 'Username and password are required' };
+            // Appwrite requires email for session creation
+            // If input doesn't look like email, assume it's the constructed email from username
+            let email = emailOrUsername;
+            if (!email.includes('@')) {
+                email = `${emailOrUsername}@example.com`;
             }
 
-            // Try to fetch from Appwrite first
-            let user = null;
-            
-            try {
-                const Query = getQuery();
-                if (Query && this.databases) {
-                    const response = await this.databases.listDocuments(
-                        APPWRITE_CONFIG.databaseId,
-                        APPWRITE_CONFIG.collections.users,
-                        [Query.equal('username', username.toLowerCase())]
-                    );
+            await this.account.createEmailPasswordSession(email, password);
+            await this.checkSession();
 
-                    if (response.documents.length > 0) {
-                        user = response.documents[0];
-                    }
-                }
-            } catch (error) {
-                console.warn('Fetching from Appwrite:', error);
-            }
+            // Update status online
+            this.updateUserStatus('online');
 
-            // Fallback to local users object
-            if (!user) {
-                user = this.users[username.toLowerCase()];
-            }
-
-            if (!user) {
-                return { success: false, message: 'User not found' };
-            }
-
-            // Verify password
-            const passwordMatch = await this.comparePassword(password, user.passwordHash);
-            if (!passwordMatch) {
-                return { success: false, message: 'Incorrect password' };
-            }
-
-            // Update user status to online in Appwrite
-            const now = new Date().toISOString();
-            try {
-                if (this.databases) {
-                    await this.databases.updateDocument(
-                        APPWRITE_CONFIG.databaseId,
-                        APPWRITE_CONFIG.collections.users,
-                        user.userId || user.$id,
-                        {
-                            status: 'online',
-                            lastLogin: now
-                        }
-                    );
-                }
-            } catch (error) {
-                console.warn('Updating user status:', error);
-            }
-
-            // Create session user object
-            const sessionUser = {
-                id: user.userId || user.$id,
-                name: user.name,
-                username: user.username,
-                avatar: user.avatar,
-                email: user.email || username
-            };
-
-            this.saveCurrentUser(sessionUser);
-
-            return {
-                success: true,
-                message: 'Login successful',
-                user: sessionUser
-            };
+            return { success: true, message: 'Login successful' };
         } catch (error) {
             console.error('❌ Login error:', error);
-            return { success: false, message: 'Login failed. Please try again.' };
+            return { success: false, message: error.message };
         }
     }
 
     // Logout user
     async logout() {
         try {
-            if (this.currentUser) {
-                // Update status to offline in Appwrite
-                try {
-                    if (this.databases) {
-                        await this.databases.updateDocument(
-                            APPWRITE_CONFIG.databaseId,
-                            APPWRITE_CONFIG.collections.users,
-                            this.currentUser.id,
-                            {
-                                status: 'offline'
-                            }
-                        );
-                    }
-                } catch (error) {
-                    console.warn('Updating logout status:', error);
-                }
-            }
-
-            localStorage.removeItem('sage_current_user');
+            await this.updateUserStatus('offline');
+            await this.account.deleteSession('current');
             this.currentUser = null;
+            window.location.reload();
         } catch (error) {
             console.error('❌ Logout error:', error);
         }
     }
 
-    // Check if user is authenticated
-    isAuthenticated() {
-        return this.currentUser !== null;
+    // Update user status
+    async updateUserStatus(status) {
+        try {
+            if (this.currentUser && this.databases) {
+                await this.databases.updateRow({
+                    databaseId: APPWRITE_CONFIG.databaseId,
+                    tableId: APPWRITE_CONFIG.collections.users,
+                    rowId: this.currentUser.id,
+                    data: {
+                        status: status,
+                        lastLogin: new Date().toISOString()
+                    }
+                });
+            }
+        } catch (error) {
+            console.warn('Could not update status:', error);
+        }
     }
 
-    // Get all users from Appwrite
+    // Get all users (from database)
     async getAllUsers() {
         try {
-            if (this.databases) {
-                const response = await this.databases.listDocuments(
-                    APPWRITE_CONFIG.databaseId,
-                    APPWRITE_CONFIG.collections.users
-                );
-
-                return response.documents.map(user => ({
-                    id: user.userId || user.$id,
-                    name: user.name,
-                    username: user.username,
-                    avatar: user.avatar,
-                    status: user.status
-                }));
-            }
+            const response = await this.databases.listRows({
+                databaseId: APPWRITE_CONFIG.databaseId,
+                tableId: APPWRITE_CONFIG.collections.users
+            });
+            return response.rows.map(doc => ({
+                id: doc.$id,
+                name: doc.name,
+                username: doc.username,
+                avatar: doc.avatar,
+                status: doc.status
+            }));
         } catch (error) {
-            console.warn('⚠️ Fetching users:', error);
+            console.warn('Failed to fetch users:', error);
+            return [];
         }
-        
-        // Fallback to local users
-        return Object.values(this.users).map(user => ({
-            id: user.userId,
-            name: user.name,
-            username: user.username,
-            avatar: user.avatar,
-            status: user.status
-        }));
-    }
-
-    // Get user by username from Appwrite
-    async getUserByUsername(username) {
-        try {
-            const Query = getQuery();
-            if (Query && this.databases) {
-                const response = await this.databases.listDocuments(
-                    APPWRITE_CONFIG.databaseId,
-                    APPWRITE_CONFIG.collections.users,
-                    [Query.equal('username', username.toLowerCase())]
-                );
-
-                if (response.documents.length > 0) {
-                    const user = response.documents[0];
-                    return {
-                        id: user.userId || user.$id,
-                        name: user.name,
-                        username: user.username,
-                        avatar: user.avatar,
-                        status: user.status
-                    };
-                }
-            }
-        } catch (error) {
-            console.warn('⚠️ Fetching user:', error);
-        }
-        
-        return null;
     }
 
     // Generate avatar initials
     generateAvatar(name) {
         return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+    }
+
+    // Check if user is authenticated
+    isAuthenticated() {
+        return !!this.currentUser;
     }
 }
 
@@ -354,10 +205,10 @@ function switchToLogin() {
 }
 
 // Toggle password visibility
-function togglePasswordVisibility(inputId) {
+window.togglePasswordVisibility = function (inputId) {
     const input = document.getElementById(inputId);
-    const button = event.target.closest('button');
-    
+    const button = event.currentTarget; // changed to currentTarget
+
     if (input.type === 'password') {
         input.type = 'text';
         button.innerHTML = '<i class="fas fa-eye-slash"></i>';
@@ -366,6 +217,7 @@ function togglePasswordVisibility(inputId) {
         button.innerHTML = '<i class="fas fa-eye"></i>';
     }
 }
+
 
 // Handle registration form submission
 document.getElementById('registerFormElement')?.addEventListener('submit', async (e) => {
@@ -383,16 +235,15 @@ document.getElementById('registerFormElement')?.addEventListener('submit', async
 
     showLoading(true);
 
-    const result = await authManager.registerUser(name, username, password);
+    // Note: We're passing null for email to trigger the auto-generation fallback
+    // In a real app, you should add an email input field
+    const result = await authManager.registerUser(name, username, password, null);
 
     showLoading(false);
 
     if (result.success) {
         showNotification(result.message, 'success');
-        document.getElementById('registerFormElement').reset();
-        setTimeout(() => {
-            switchToLogin();
-        }, 1000);
+        // No need to switch to login, registerUser auto-logs in
     } else {
         showNotification(result.message, 'error');
     }
@@ -413,11 +264,7 @@ document.getElementById('loginFormElement')?.addEventListener('submit', async (e
 
     if (result.success) {
         showNotification(result.message, 'success');
-        document.getElementById('loginFormElement').reset();
-        setTimeout(() => {
-            showAuthContainer(false);
-            initializeChat();
-        }, 500);
+        // initializeChat is called in checkSession
     } else {
         showNotification(result.message, 'error');
     }
@@ -430,6 +277,10 @@ document.getElementById('loginFormElement')?.addEventListener('submit', async (e
 function showAuthContainer(show) {
     const authContainer = document.getElementById('authContainer');
     const chatContainer = document.getElementById('chatContainer');
+    const loadingSpinner = document.getElementById('loadingSpinner');
+
+    // Hide loading info when showing containers
+    loadingSpinner.classList.remove('active');
 
     if (show) {
         authContainer.classList.add('active');
@@ -476,16 +327,6 @@ function showLoading(show) {
     }
 }
 
-// Page Load
-window.addEventListener('load', () => {
-    if (authManager.isAuthenticated()) {
-        showAuthContainer(false);
-        initializeChat();
-    } else {
-        showAuthContainer(true);
-    }
-});
-
 // Update password strength meter
 document.getElementById('registerPassword')?.addEventListener('input', (e) => {
     const password = e.target.value;
@@ -516,7 +357,9 @@ document.getElementById('registerPassword')?.addEventListener('input', (e) => {
         text = 'Strong';
     }
 
-    strengthBar.style.background = `linear-gradient(90deg, ${color}, ${color}cc)`;
-    strengthText.textContent = `Password strength: ${text}`;
-    strengthText.style.color = color;
+    if (strengthBar) strengthBar.style.background = `linear-gradient(90deg, ${color}, ${color}cc)`;
+    if (strengthText) {
+        strengthText.textContent = `Password strength: ${text}`;
+        strengthText.style.color = color;
+    }
 });

@@ -7,26 +7,43 @@ class ChatManager {
     constructor() {
         this.channels = {};
         this.messages = {};
-        this.directMessages = {};
         this.currentChannel = null;
-        this.currentUser = authManager.currentUser;
-        this.databases = appwriteService.getDatabases();
-        this.realtimeService = appwriteService.getRealtimeService();
-        this.messageSubscriptions = {};
-        this.channelSubscription = null;
+        this.databases = null;
+        this.client = null;
+        this.subscriptions = {};
+
+        this.init();
+    }
+
+    async init() {
+        // Wait for Appwrite to be initialized in appwrite-config.js
+        if (window.appwriteDatabases && window.appwriteClient) {
+            this.databases = window.appwriteDatabases;
+            this.client = window.appwriteClient;
+
+            // Only initialize if user is logged in
+            if (authManager.currentUser) {
+                await this.initializeDefaultChannels();
+            }
+        } else {
+            setTimeout(() => this.init(), 100);
+        }
     }
 
     // Initialize default channels in Appwrite
     async initializeDefaultChannels() {
         try {
-            // Fetch existing channels from Appwrite
-            const response = await this.databases.listDocuments(
-                APPWRITE_CONFIG.databaseId,
-                APPWRITE_CONFIG.collections.channels
-            );
+            // Fetch channels from Appwrite
+            // Fetch channels from Appwrite
+            const response = await this.databases.listRows({
+                databaseId: APPWRITE_CONFIG.databaseId,
+                tableId: APPWRITE_CONFIG.collections.channels
+            });
 
-            if (response.documents.length > 0) {
-                response.documents.forEach(doc => {
+            this.channels = {}; // Reset local cache
+
+            if (response.rows.length > 0) {
+                response.rows.forEach(doc => {
                     this.channels[doc.name] = {
                         id: doc.$id,
                         name: doc.name,
@@ -38,151 +55,42 @@ class ChatManager {
                         createdAt: doc.createdAt
                     };
                 });
-                return;
+            } else {
+                // No channels found, maybe create defaults if permission allows?
+                // For now, just log.
+                console.log('ℹ️ No channels found.');
             }
 
-            // Create default channels if none exist
-            const defaultChannels = [
-                {
-                    name: 'general',
-                    displayName: 'General',
-                    icon: 'fa-comments',
-                    description: 'General discussion',
-                    type: 'channel'
-                },
-                {
-                    name: 'announcements',
-                    displayName: 'Announcements',
-                    icon: 'fa-bullhorn',
-                    description: 'Important announcements',
-                    type: 'channel'
-                },
-                {
-                    name: 'random',
-                    displayName: 'Random',
-                    icon: 'fa-dice',
-                    description: 'Random conversations',
-                    type: 'channel'
-                },
-                {
-                    name: 'introductions',
-                    displayName: 'Introductions',
-                    icon: 'fa-handshake',
-                    description: 'Introduce yourself',
-                    type: 'channel'
-                }
-            ];
+            this.subscribeToChannels();
+            renderChannels();
 
-            for (const ch of defaultChannels) {
-                const channelId = 'ch_' + Math.random().toString(36).substr(2, 9);
-                const channelData = {
-                    ...ch,
-                    creator: this.currentUser.id,
-                    members: [this.currentUser.id],
-                    createdAt: new Date().toISOString()
-                };
-
-                try {
-                    await this.databases.createDocument(
-                        APPWRITE_CONFIG.databaseId,
-                        APPWRITE_CONFIG.collections.channels,
-                        channelId,
-                        channelData
-                    );
-
-                    this.channels[ch.name] = {
-                        id: channelId,
-                        ...channelData
-                    };
-                } catch (error) {
-                    console.warn(`Creating channel ${ch.name}:`, error);
-                }
+            // Select first channel if available
+            const firstChannel = Object.values(this.channels)[0];
+            if (firstChannel) {
+                selectChannel(firstChannel.id);
             }
 
-            console.log('Default channels initialized');
         } catch (error) {
-            console.warn('Initializing channels:', error);
-            // Fallback to local channels
-            this.loadChannels();
+            console.error('❌ Error fetching channels:', error);
+            showNotification('Could not load channels', 'error');
         }
-    }
-
-    // Load channels from localStorage (fallback)
-    loadChannels() {
-        const stored = localStorage.getItem('sage_channels');
-        if (stored) {
-            this.channels = JSON.parse(stored);
-        } else if (Object.keys(this.channels).length === 0) {
-            this.initializeDefaultChannelsLocal();
-        }
-    }
-
-    // Initialize default channels locally
-    initializeDefaultChannelsLocal() {
-        this.channels = {
-            general: {
-                id: 'ch_general',
-                name: 'general',
-                displayName: 'General',
-                icon: 'fa-comments',
-                description: 'General discussion',
-                type: 'channel',
-                members: [this.currentUser.id],
-                createdAt: new Date().toISOString()
-            },
-            announcements: {
-                id: 'ch_announcements',
-                name: 'announcements',
-                displayName: 'Announcements',
-                icon: 'fa-bullhorn',
-                description: 'Important announcements',
-                type: 'channel',
-                members: [this.currentUser.id],
-                createdAt: new Date().toISOString()
-            },
-            random: {
-                id: 'ch_random',
-                name: 'random',
-                displayName: 'Random',
-                icon: 'fa-dice',
-                description: 'Random conversations',
-                type: 'channel',
-                members: [this.currentUser.id],
-                createdAt: new Date().toISOString()
-            },
-            introductions: {
-                id: 'ch_introductions',
-                name: 'introductions',
-                displayName: 'Introductions',
-                icon: 'fa-handshake',
-                description: 'Introduce yourself',
-                type: 'channel',
-                members: [this.currentUser.id],
-                createdAt: new Date().toISOString()
-            }
-        };
-        this.saveChannels();
-    }
-
-    // Save channels to localStorage
-    saveChannels() {
-        localStorage.setItem('sage_channels', JSON.stringify(this.channels));
     }
 
     // Load messages from Appwrite
     async loadMessages(channelId) {
         try {
-            const response = await this.databases.listDocuments(
-                APPWRITE_CONFIG.databaseId,
-                APPWRITE_CONFIG.collections.messages,
-                [
+            const { Query } = window.Appwrite;
+            const response = await this.databases.listRows({
+                databaseId: APPWRITE_CONFIG.databaseId,
+                tableId: APPWRITE_CONFIG.collections.messages,
+                queries: [
                     Query.equal('channelId', channelId),
                     Query.orderDesc('timestamp'),
                     Query.limit(50)
                 ]
-            );
+            });
 
-            this.messages[channelId] = response.documents.reverse().map(doc => ({
+            this.messages[channelId] = response.rows.reverse().map(doc => ({
                 id: doc.$id,
                 author: doc.author,
                 authorName: doc.authorName,
@@ -196,80 +104,44 @@ class ChatManager {
 
             return this.messages[channelId];
         } catch (error) {
-            console.warn('Loading messages:', error);
-            // Fallback to localStorage
-            return this.loadMessagesLocal(channelId);
+            console.error('❌ Error loading messages:', error);
+            // Return empty array on error to prevent UI crash
+            return [];
         }
-    }
-
-    // Load messages from localStorage (fallback)
-    loadMessagesLocal(channelId) {
-        const stored = localStorage.getItem('sage_messages');
-        const messages = stored ? JSON.parse(stored) : {};
-        return messages[channelId] || [];
-    }
-
-    // Save messages to localStorage (fallback)
-    saveMessages() {
-        localStorage.setItem('sage_messages', JSON.stringify(this.messages));
     }
 
     // Send message
     async sendMessage(channelId, text) {
         if (!text.trim() || !this.currentChannel) return;
 
-        const messageId = 'msg_' + Math.random().toString(36).substr(2, 9);
-        const messageData = {
-            channelId: channelId,
-            authorId: this.currentUser.id,
-            author: this.currentUser.username,
-            authorName: this.currentUser.name,
-            text: text.trim(),
-            timestamp: new Date().toISOString(),
-            avatar: this.currentUser.avatar,
-            edited: false,
-            editedAt: null
-        };
-
         try {
-            // Save to Appwrite
-            const response = await this.databases.createDocument(
-                APPWRITE_CONFIG.databaseId,
-                APPWRITE_CONFIG.collections.messages,
-                messageId,
-                messageData
-            );
+            const currentUser = authManager.currentUser;
 
-            console.log('Message sent:', response);
-
-            // Initialize channel messages if needed
-            if (!this.messages[channelId]) {
-                this.messages[channelId] = [];
-            }
-
-            this.messages[channelId].push({
-                id: messageId,
-                ...messageData
-            });
-
-            this.saveMessages();
-            return response;
-        } catch (error) {
-            console.warn('Sending message to Appwrite:', error);
-            
-            // Fallback: Save to localStorage only
-            if (!this.messages[channelId]) {
-                this.messages[channelId] = [];
-            }
-
-            const message = {
-                id: messageId,
-                ...messageData
+            const messageData = {
+                channelId: channelId,
+                authorId: currentUser.id,
+                author: currentUser.username,
+                authorName: currentUser.name,
+                text: text.trim(),
+                timestamp: new Date().toISOString(),
+                avatar: currentUser.avatar,
+                edited: false,
+                editedAt: null
             };
 
-            this.messages[channelId].push(message);
-            this.saveMessages();
-            return message;
+            await this.databases.createRow({
+                databaseId: APPWRITE_CONFIG.databaseId,
+                tableId: APPWRITE_CONFIG.collections.messages,
+                rowId: 'unique()',
+                data: messageData
+            });
+
+            // Optimistic update is not strictly needed with fast realtime, 
+            // but we rely on realtime subscription to add it to the list.
+
+        } catch (error) {
+            console.error('❌ Error sending message:', error);
+            showNotification('Failed to send message', 'error');
         }
     }
 
@@ -282,52 +154,33 @@ class ChatManager {
     async createChannel(name, description = '') {
         if (!name) return { success: false, message: 'Channel name is required' };
 
-        const channelId = 'ch_' + Math.random().toString(36).substr(2, 9);
-        const channelName = name.toLowerCase().replace(/\s+/g, '-');
-
-        const channelData = {
-            name: channelName,
-            displayName: name,
-            icon: 'fa-hash',
-            description: description,
-            type: 'channel',
-            creator: this.currentUser.id,
-            members: [this.currentUser.id],
-            createdAt: new Date().toISOString()
-        };
-
         try {
-            // Save to Appwrite
-            const response = await this.databases.createDocument(
-                APPWRITE_CONFIG.databaseId,
-                APPWRITE_CONFIG.collections.channels,
-                channelId,
-                channelData
-            );
+            const channelName = name.toLowerCase().replace(/\s+/g, '-');
+            const currentUser = authManager.currentUser;
 
-            this.channels[channelName] = {
-                id: channelId,
-                ...channelData
+            const channelData = {
+                name: channelName,
+                displayName: name,
+                icon: 'fa-hash',
+                description: description,
+                type: 'channel',
+                creator: currentUser.id,
+                members: [currentUser.id],
+                createdAt: new Date().toISOString()
             };
 
-            this.messages[channelId] = [];
-            this.saveChannels();
-            this.saveMessages();
+            await this.databases.createRow({
+                databaseId: APPWRITE_CONFIG.databaseId,
+                tableId: APPWRITE_CONFIG.collections.channels,
+                rowId: 'unique()',
+                data: channelData
+            });
 
-            return { success: true, message: 'Channel created', channel: this.channels[channelName] };
+            return { success: true, message: 'Channel created' };
+
         } catch (error) {
-            console.warn('Creating channel in Appwrite:', error);
-            
-            // Fallback: Save to localStorage
-            this.channels[channelName] = {
-                id: channelId,
-                ...channelData
-            };
-            this.messages[channelId] = [];
-            this.saveChannels();
-            this.saveMessages();
-
-            return { success: true, message: 'Channel created', channel: this.channels[channelName] };
+            console.error('❌ Error creating channel:', error);
+            return { success: false, message: error.message };
         }
     }
 
@@ -341,49 +194,68 @@ class ChatManager {
         return Object.values(this.channels).find(ch => ch.id === channelId);
     }
 
-    // Get channel by name
-    getChannelByName(name) {
-        return this.channels[name];
-    }
-
     // Search channels
     searchChannels(query) {
         if (!query) return this.getAllChannels();
         const lowerQuery = query.toLowerCase();
-        return this.getAllChannels().filter(ch => 
-            ch.name.includes(lowerQuery) || 
-            ch.description.includes(lowerQuery)
+        return this.getAllChannels().filter(ch =>
+            ch.name.includes(lowerQuery) ||
+            (ch.description && ch.description.toLowerCase().includes(lowerQuery))
         );
     }
 
     // Subscribe to real-time messages
     subscribeToMessages(channelId) {
-        try {
-            if (this.messageSubscriptions[channelId]) {
-                return; // Already subscribed
-            }
+        // Unsubscribe from previous channel messages if any
+        if (this.subscriptions['current_messages']) {
+            this.subscriptions['current_messages']();
+            delete this.subscriptions['current_messages'];
+        }
 
-            this.messageSubscriptions[channelId] = this.realtimeService.subscribeToMessages(
-                channelId,
-                (update) => {
-                    console.log('Message update:', update);
-                    
-                    if (update.type === 'message') {
-                        if (update.action === 'create') {
-                            if (!this.messages[channelId]) {
-                                this.messages[channelId] = [];
+        try {
+            const unsubscribe = this.client.subscribe(
+                `tablesdb.${APPWRITE_CONFIG.databaseId}.tables.${APPWRITE_CONFIG.collections.messages}.rows`,
+                (response) => {
+                    const event = response.events[0];
+                    const payload = response.payload;
+
+                    // Filter messages by channel
+                    if (payload.channelId === channelId) {
+                        if (event.includes('create')) {
+                            if (!this.messages[channelId]) this.messages[channelId] = [];
+
+                            // Adapt payload to message structure
+                            const newMessage = {
+                                id: payload.$id,
+                                author: payload.author,
+                                authorName: payload.authorName,
+                                authorId: payload.authorId,
+                                text: payload.text,
+                                timestamp: payload.timestamp,
+                                avatar: payload.avatar,
+                                edited: payload.edited,
+                                editedAt: payload.editedAt
+                            };
+
+                            this.messages[channelId].push(newMessage);
+
+                        } else if (event.includes('update')) {
+                            // Handle update
+                            const index = this.messages[channelId]?.findIndex(m => m.id === payload.$id);
+                            if (index !== -1 && index !== undefined) {
+                                this.messages[channelId][index] = {
+                                    ...this.messages[channelId][index],
+                                    text: payload.text,
+                                    edited: payload.edited,
+                                    editedAt: payload.editedAt
+                                };
                             }
-                            this.messages[channelId].push(update.data);
-                        } else if (update.action === 'update') {
-                            const index = this.messages[channelId].findIndex(m => m.id === update.data.id);
-                            if (index !== -1) {
-                                this.messages[channelId][index] = update.data;
-                            }
-                        } else if (update.action === 'delete') {
-                            this.messages[channelId] = this.messages[channelId].filter(m => m.id !== update.data.id);
+                        } else if (event.includes('delete')) {
+                            // Handle delete
+                            this.messages[channelId] = this.messages[channelId].filter(m => m.id !== payload.$id);
                         }
-                        
-                        // Re-render messages
+
+                        // Re-render
                         if (this.currentChannel === channelId) {
                             renderMessages();
                         }
@@ -391,60 +263,59 @@ class ChatManager {
                 }
             );
 
-            console.log('Subscribed to messages for channel:', channelId);
+            this.subscriptions['current_messages'] = unsubscribe;
+            console.log(`📡 Subscribed to messages for ${channelId}`);
+
         } catch (error) {
-            console.warn('Subscribing to messages:', error);
+            console.error('❌ Subscription error:', error);
         }
     }
 
-    // Unsubscribe from messages
-    unsubscribeFromMessages(channelId) {
-        try {
-            if (this.messageSubscriptions[channelId]) {
-                this.realtimeService.unsubscribe(`messages_${channelId}`);
-                delete this.messageSubscriptions[channelId];
-            }
-        } catch (error) {
-            console.warn('Unsubscribing from messages:', error);
-        }
-    }
-
-    // Subscribe to channels
+    // Subscribe to channels list updates
     subscribeToChannels() {
-        try {
-            if (this.channelSubscription) {
-                return;
-            }
+        if (this.subscriptions['channels']) return;
 
-            this.channelSubscription = this.realtimeService.subscribeToChannels((update) => {
-                console.log('Channel update:', update);
-                
-                if (update.type === 'channel') {
-                    if (update.action === 'create' || update.action === 'update') {
-                        this.channels[update.data.name] = {
-                            id: update.data.$id,
-                            ...update.data
+        try {
+            const unsubscribe = this.client.subscribe(
+                `tablesdb.${APPWRITE_CONFIG.databaseId}.tables.${APPWRITE_CONFIG.collections.channels}.rows`,
+                (response) => {
+                    const event = response.events[0];
+                    const payload = response.payload;
+
+                    if (event.includes('create') || event.includes('update')) {
+                        this.channels[payload.name] = {
+                            id: payload.$id,
+                            name: payload.name,
+                            displayName: payload.displayName || payload.name,
+                            icon: payload.icon || 'fa-hash',
+                            description: payload.description || '',
+                            type: payload.type || 'channel',
+                            members: payload.members || [],
+                            createdAt: payload.createdAt
                         };
+                        renderChannels();
+                    } else if (event.includes('delete')) {
+                        delete this.channels[payload.name];
                         renderChannels();
                     }
                 }
-            });
+            );
 
-            console.log('Subscribed to channels');
+            this.subscriptions['channels'] = unsubscribe;
+            console.log('📡 Subscribed to global channel updates');
+
         } catch (error) {
-            console.warn('Subscribing to channels:', error);
+            console.error('❌ Channel subscription error:', error);
         }
     }
 
-    // Cleanup on logout
+    // Cleanup
     cleanup() {
-        try {
-            this.realtimeService.unsubscribeAll();
-            this.messageSubscriptions = {};
-            this.channelSubscription = null;
-        } catch (error) {
-            console.warn('Cleanup error:', error);
-        }
+        Object.values(this.subscriptions).forEach(unsub => unsub());
+        this.subscriptions = {};
+        this.messages = {};
+        this.channels = {};
+        this.currentChannel = null;
     }
 }
 
@@ -456,36 +327,17 @@ const chatManager = new ChatManager();
 // ============================================
 
 async function initializeChat() {
-    try {
-        // Initialize channels from Appwrite
-        await chatManager.initializeDefaultChannels();
+    // Auth manager calls this when session is valid.
+    // ChatManager init relies on window.appwrite* which usually is ready by now.
+    // Explicitly re-trigger init to be sure
+    chatManager.init();
 
-        // Update profile in user menu
-        const profileUsername = document.getElementById('profileUsername');
-        if (profileUsername) {
-            profileUsername.textContent = authManager.currentUser.name;
-        }
-
-        // Render channels
-        renderChannels();
-
-        // Subscribe to channel updates
-        chatManager.subscribeToChannels();
-
-        // Select first channel by default
-        const firstChannel = chatManager.getAllChannels()[0];
-        if (firstChannel) {
-            selectChannel(firstChannel.id);
-        }
-
-        // Setup event listeners
-        setupEventListeners();
-
-        showNotification(`Welcome, ${authManager.currentUser.name}!`, 'success');
-    } catch (error) {
-        console.error('Chat initialization error:', error);
-        showNotification('Error initializing chat', 'error');
+    const profileUsername = document.getElementById('profileUsername');
+    if (profileUsername && authManager.currentUser) {
+        profileUsername.textContent = authManager.currentUser.name;
     }
+
+    showNotification(`Welcome, ${authManager.currentUser.name}!`, 'success');
 }
 
 // Render all channels in sidebar
@@ -495,9 +347,18 @@ function renderChannels() {
 
     channelsList.innerHTML = '';
 
+    if (channels.length === 0) {
+        channelsList.innerHTML = '<div style="padding: 10px; color: #72767d; font-size: 0.9em;">No channels found.</div>';
+    }
+
     channels.forEach(channel => {
         const button = document.createElement('button');
         button.className = 'channel-item';
+        // Add active class if it matches current channel
+        if (chatManager.currentChannel === channel.id) {
+            button.classList.add('active');
+        }
+
         button.innerHTML = `
             <i class="fas ${channel.icon}"></i>
             <span>${channel.name}</span>
@@ -510,25 +371,27 @@ function renderChannels() {
 // Select channel and load messages
 async function selectChannel(channelId) {
     try {
+        if (chatManager.currentChannel === channelId) return;
+
         chatManager.currentChannel = channelId;
 
-        // Update active button
+        // Update active button UI
         document.querySelectorAll('.channel-item').forEach(btn => {
             btn.classList.remove('active');
         });
-        event.target.closest('.channel-item')?.classList.add('active');
+
+        // Find the button again (DOM might have changed) or update active state during render
+        renderChannels();
 
         // Get channel info
-        const channels = chatManager.getAllChannels();
-        const channel = channels.find(ch => ch.id === channelId);
-
+        const channel = chatManager.getChannel(channelId);
         if (!channel) return;
 
         // Update header
         document.getElementById('channelName').textContent = '# ' + channel.displayName;
         document.getElementById('channelDescription').textContent = channel.description;
 
-        // Load messages from Appwrite
+        // Load messages
         await chatManager.loadMessages(channelId);
 
         // Subscribe to real-time updates
@@ -547,7 +410,9 @@ function renderMessages() {
     const messagesArea = document.getElementById('messagesArea');
     const messages = chatManager.getChannelMessages(chatManager.currentChannel);
 
-    if (messages.length === 0) {
+    messagesArea.innerHTML = '';
+
+    if (!messages || messages.length === 0) {
         messagesArea.innerHTML = `
             <div class="messages-welcome">
                 <div class="welcome-icon">
@@ -560,8 +425,6 @@ function renderMessages() {
         return;
     }
 
-    messagesArea.innerHTML = '';
-
     messages.forEach((msg, index) => {
         const isOwnMessage = msg.author === authManager.currentUser.username;
         const messageEl = document.createElement('div');
@@ -569,9 +432,9 @@ function renderMessages() {
 
         const showAvatar = index === 0 || messages[index - 1].author !== msg.author;
 
-        const time = new Date(msg.timestamp).toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit' 
+        const time = new Date(msg.timestamp).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit'
         });
 
         messageEl.innerHTML = `
@@ -604,10 +467,6 @@ function sendMessage() {
 
     input.value = '';
     input.focus();
-
-    renderMessages();
-
-    showNotification('Message sent!', 'success');
 }
 
 // Show create channel modal
@@ -617,37 +476,23 @@ function showCreateChannelModal() {
 
     const description = prompt('Enter channel description (optional):');
 
-    (async () => {
-        const result = await chatManager.createChannel(name, description || '');
-        if (result.success) {
-            renderChannels();
-            showNotification(result.message, 'success');
-        } else {
-            showNotification(result.message, 'error');
-        }
-    })();
+    // Fire and forget
+    chatManager.createChannel(name, description || '')
+        .then(result => {
+            if (result.success) {
+                showNotification(result.message, 'success');
+            } else {
+                showNotification(result.message, 'error');
+            }
+        });
 }
 
-// Toggle user menu
-function toggleUserMenu() {
-    const userMenu = document.getElementById('userMenu');
-    userMenu.classList.toggle('active');
-
-    document.addEventListener('click', (e) => {
-        if (!e.target.closest('.fab-menu') && !e.target.closest('.user-menu')) {
-            userMenu.classList.remove('active');
-        }
-    });
-}
 
 // Logout user
 async function logout() {
     if (confirm('Are you sure you want to logout?')) {
         chatManager.cleanup();
         await authManager.logout();
-        showAuthContainer(true);
-        showNotification('Logged out successfully', 'success');
-        document.getElementById('loginFormElement').reset();
     }
 }
 
@@ -655,12 +500,17 @@ async function logout() {
 function toggleMemberList() {
     const rightSidebar = document.getElementById('rightSidebar');
     rightSidebar.classList.toggle('active');
-    renderMembers();
+    if (rightSidebar.classList.contains('active')) {
+        renderMembers();
+    }
 }
 
-// Render members list
+// Render members list (Available users in the system)
 async function renderMembers() {
     const membersList = document.getElementById('membersList');
+    // For now, load all users. In a real app, this should be channel members.
+    // However, checking channel members requires more complex permissions/queries.
+    // We will list all users for demonstration.
     const allUsers = await authManager.getAllUsers();
 
     membersList.innerHTML = '';
@@ -672,7 +522,7 @@ async function renderMembers() {
             <div class="member-avatar">${user.avatar}</div>
             <div class="member-info">
                 <h4>${user.name}</h4>
-                <p class="member-status">${user.status}</p>
+                <p class="member-status">${user.status || 'offline'}</p>
             </div>
         `;
         membersList.appendChild(memberEl);
@@ -681,6 +531,7 @@ async function renderMembers() {
 
 // Utility function to escape HTML
 function escapeHtml(text) {
+    if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
@@ -742,6 +593,9 @@ function setupEventListeners() {
         results.forEach(channel => {
             const button = document.createElement('button');
             button.className = 'channel-item';
+            if (chatManager.currentChannel === channel.id) {
+                button.classList.add('active');
+            }
             button.innerHTML = `
                 <i class="fas ${channel.icon}"></i>
                 <span>${channel.name}</span>
@@ -756,11 +610,23 @@ function setupEventListeners() {
     }, 500);
 }
 
+// Call setup listeners on load (if not called by auth)
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupEventListeners);
+} else {
+    setupEventListeners();
+}
+
+// Auto-load chat if user is authenticated
 // Auto-load chat if user is authenticated
 window.addEventListener('load', () => {
-    if (authManager.isAuthenticated()) {
-        setTimeout(() => {
+    const checkAuth = () => {
+        if (window.authManager && window.authManager.isAuthenticated()) {
             initializeChat();
-        }, 100);
-    }
+        } else if (!window.authManager) {
+            // Retry if authManager not yet loaded
+            setTimeout(checkAuth, 100);
+        }
+    };
+    checkAuth();
 });

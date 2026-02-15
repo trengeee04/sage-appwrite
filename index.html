@@ -1,13 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SAGE ChatApp - Professional Chat Application</title>
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Poppins:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
 </head>
+
 <body>
     <!-- Authentication Container -->
     <div id="authContainer" class="auth-container active">
@@ -29,12 +33,7 @@
                             <i class="fas fa-user"></i>
                             Username
                         </label>
-                        <input 
-                            type="text" 
-                            id="loginUsername" 
-                            placeholder="Enter your username"
-                            required
-                        >
+                        <input type="text" id="loginUsername" placeholder="Enter your username" required>
                         <div class="input-focus-effect"></div>
                     </div>
 
@@ -44,13 +43,9 @@
                             Password
                         </label>
                         <div class="password-input-wrapper">
-                            <input 
-                                type="password" 
-                                id="loginPassword" 
-                                placeholder="Enter your password"
-                                required
-                            >
-                            <button type="button" class="toggle-password" onclick="togglePasswordVisibility('loginPassword')">
+                            <input type="password" id="loginPassword" placeholder="Enter your password" required>
+                            <button type="button" class="toggle-password"
+                                onclick="togglePasswordVisibility('loginPassword')">
                                 <i class="fas fa-eye"></i>
                             </button>
                         </div>
@@ -64,7 +59,7 @@
                 </form>
 
                 <div class="form-footer">
-                    <p>Don't have an account? 
+                    <p>Don't have an account?
                         <button type="button" class="link-button" onclick="switchToRegister()">
                             Create one
                         </button>
@@ -89,12 +84,7 @@
                             <i class="fas fa-user-plus"></i>
                             Full Name
                         </label>
-                        <input 
-                            type="text" 
-                            id="registerName" 
-                            placeholder="Your full name"
-                            required
-                        >
+                        <input type="text" id="registerName" placeholder="Your full name" required>
                         <div class="input-focus-effect"></div>
                     </div>
 
@@ -103,12 +93,7 @@
                             <i class="fas fa-at"></i>
                             Username
                         </label>
-                        <input 
-                            type="text" 
-                            id="registerUsername" 
-                            placeholder="Choose a username"
-                            required
-                        >
+                        <input type="text" id="registerUsername" placeholder="Choose a username" required>
                         <div class="input-focus-effect"></div>
                     </div>
 
@@ -118,13 +103,10 @@
                             Password
                         </label>
                         <div class="password-input-wrapper">
-                            <input 
-                                type="password" 
-                                id="registerPassword" 
-                                placeholder="Create a strong password"
-                                required
-                            >
-                            <button type="button" class="toggle-password" onclick="togglePasswordVisibility('registerPassword')">
+                            <input type="password" id="registerPassword" placeholder="Create a strong password"
+                                required>
+                            <button type="button" class="toggle-password"
+                                onclick="togglePasswordVisibility('registerPassword')">
                                 <i class="fas fa-eye"></i>
                             </button>
                         </div>
@@ -141,13 +123,10 @@
                             Confirm Password
                         </label>
                         <div class="password-input-wrapper">
-                            <input 
-                                type="password" 
-                                id="registerConfirmPassword" 
-                                placeholder="Confirm your password"
-                                required
-                            >
-                            <button type="button" class="toggle-password" onclick="togglePasswordVisibility('registerConfirmPassword')">
+                            <input type="password" id="registerConfirmPassword" placeholder="Confirm your password"
+                                required>
+                            <button type="button" class="toggle-password"
+                                onclick="togglePasswordVisibility('registerConfirmPassword')">
                                 <i class="fas fa-eye"></i>
                             </button>
                         </div>
@@ -161,7 +140,7 @@
                 </form>
 
                 <div class="form-footer">
-                    <p>Already have an account? 
+                    <p>Already have an account?
                         <button type="button" class="link-button" onclick="switchToLogin()">
                             Sign in
                         </button>
@@ -259,12 +238,7 @@
                     </button>
                 </div>
                 <div class="input-wrapper">
-                    <input 
-                        type="text" 
-                        id="messageInput" 
-                        placeholder="Type your message here..."
-                        class="message-input"
-                    >
+                    <input type="text" id="messageInput" placeholder="Type your message here..." class="message-input">
                     <div class="input-focus-line"></div>
                 </div>
                 <button class="send-btn" id="sendBtn" onclick="sendMessage()">
@@ -325,12 +299,12 @@
     </div>
 
     <!-- Appwrite SDK -->
-    <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/appwrite@latest/dist/appwrite.min.js"></script>
+    <script crossorigin="anonymous" src="/node_modules/appwrite/dist/iife/sdk.js"></script>
 
     <!-- Scripts -->
     <script src="js/appwrite-config.js"></script>
-    <script src="js/auth-setup.js"></script>
     <script src="js/auth-appwrite.js"></script>
     <script src="js/chat-appwrite.js"></script>
 </body>
+
 </html>
