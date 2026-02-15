@@ -44,6 +44,13 @@ class ChatManager {
 
             if (response.rows.length > 0) {
                 response.rows.forEach(doc => {
+                    let members = [];
+                    try {
+                        members = typeof doc.members === 'string' ? JSON.parse(doc.members) : doc.members || [];
+                    } catch (e) {
+                        members = [];
+                    }
+
                     this.channels[doc.name] = {
                         id: doc.$id,
                         name: doc.name,
@@ -51,7 +58,7 @@ class ChatManager {
                         icon: doc.icon || 'fa-hash',
                         description: doc.description || '',
                         type: doc.type || 'channel',
-                        members: doc.members || [],
+                        members: members,
                         createdAt: doc.createdAt
                     };
                 });
@@ -165,7 +172,7 @@ class ChatManager {
                 description: description,
                 type: 'channel',
                 creator: currentUser.id,
-                members: [currentUser.id],
+                members: JSON.stringify([currentUser.id]), // Store as JSON string
                 createdAt: new Date().toISOString()
             };
 
@@ -283,6 +290,13 @@ class ChatManager {
                     const payload = response.payload;
 
                     if (event.includes('create') || event.includes('update')) {
+                        let members = [];
+                        try {
+                            members = typeof payload.members === 'string' ? JSON.parse(payload.members) : payload.members || [];
+                        } catch (e) {
+                            members = [];
+                        }
+
                         this.channels[payload.name] = {
                             id: payload.$id,
                             name: payload.name,
@@ -290,7 +304,7 @@ class ChatManager {
                             icon: payload.icon || 'fa-hash',
                             description: payload.description || '',
                             type: payload.type || 'channel',
-                            members: payload.members || [],
+                            members: members,
                             createdAt: payload.createdAt
                         };
                         renderChannels();
