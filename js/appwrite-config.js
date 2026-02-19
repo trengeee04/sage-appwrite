@@ -31,7 +31,9 @@ let realtime = null;
 // Initialize Appwrite SDK
 const initAppwrite = () => {
     try {
-        const { Client, Account, TablesDB } = window.Appwrite;
+        const { Client, Account, Databases, Realtime, ID } = window.Appwrite;
+        console.log('SDK Keys:', Object.keys(window.Appwrite));
+
 
         client = new Client();
         client
@@ -39,14 +41,23 @@ const initAppwrite = () => {
             .setProject(APPWRITE_CONFIG.projectId);
 
         account = new Account(client);
-        databases = new TablesDB(client);
+        databases = new Databases(client);
+
+        if (Realtime) {
+            realtime = new Realtime(client);
+        } else {
+            console.warn('Realtime class not found in SDK, falling back to client.subscribe');
+            realtime = client;
+        }
 
         // Export for other modules
         window.appwriteClient = client;
         window.appwriteAccount = account;
-        window.appwriteDatabases = databases; // Instance of TablesDB
+        window.appwriteDatabases = databases;
+        window.appwriteRealtime = realtime; // Export Service Instance
+        window.AppwriteID = ID;             // Export ID helper
 
-        console.log('✅ Appwrite SDK initialized (TablesDB)');
+        console.log('✅ Appwrite SDK initialized (Databases)');
     } catch (error) {
         console.error('❌ Appwrite SDK initialization error:', error);
     }

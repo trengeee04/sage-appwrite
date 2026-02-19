@@ -74,11 +74,12 @@ class AuthManager {
                 const { ID } = window.Appwrite; // Ensure we have ID available
 
                 // We use the account ID as the document ID for 1:1 mapping
-                await this.databases.createRow({
-                    databaseId: APPWRITE_CONFIG.databaseId,
-                    tableId: APPWRITE_CONFIG.collections.users,
-                    rowId: this.currentUser.id,
-                    data: {
+                // We use the account ID as the document ID for 1:1 mapping
+                await this.databases.createDocument(
+                    APPWRITE_CONFIG.databaseId,
+                    APPWRITE_CONFIG.collections.users,
+                    this.currentUser.id,
+                    {
                         username: username,
                         name: name,
                         email: email,
@@ -86,7 +87,7 @@ class AuthManager {
                         status: 'online',
                         lastLogin: new Date().toISOString()
                     }
-                });
+                );
             } catch (dbError) {
                 console.warn('⚠️ Could not create user document:', dbError);
                 // Non-fatal, auth still works
@@ -139,15 +140,15 @@ class AuthManager {
     async updateUserStatus(status) {
         try {
             if (this.currentUser && this.databases) {
-                await this.databases.updateRow({
-                    databaseId: APPWRITE_CONFIG.databaseId,
-                    tableId: APPWRITE_CONFIG.collections.users,
-                    rowId: this.currentUser.id,
-                    data: {
+                await this.databases.updateDocument(
+                    APPWRITE_CONFIG.databaseId,
+                    APPWRITE_CONFIG.collections.users,
+                    this.currentUser.id,
+                    {
                         status: status,
                         lastLogin: new Date().toISOString()
                     }
-                });
+                );
             }
         } catch (error) {
             console.warn('Could not update status:', error);
@@ -157,11 +158,11 @@ class AuthManager {
     // Get all users (from database)
     async getAllUsers() {
         try {
-            const response = await this.databases.listRows({
-                databaseId: APPWRITE_CONFIG.databaseId,
-                tableId: APPWRITE_CONFIG.collections.users
-            });
-            return response.rows.map(doc => ({
+            const response = await this.databases.listDocuments(
+                APPWRITE_CONFIG.databaseId,
+                APPWRITE_CONFIG.collections.users
+            );
+            return response.documents.map(doc => ({
                 id: doc.$id,
                 name: doc.name,
                 username: doc.username,

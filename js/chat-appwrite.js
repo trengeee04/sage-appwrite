@@ -10,6 +10,7 @@ class ChatManager {
         this.currentChannel = null;
         this.databases = null;
         this.client = null;
+        this.realtime = null;
         this.subscriptions = {};
 
         this.init();
@@ -17,9 +18,10 @@ class ChatManager {
 
     async init() {
         // Wait for Appwrite to be initialized in appwrite-config.js
-        if (window.appwriteDatabases && window.appwriteClient) {
+        if (window.appwriteDatabases && window.appwriteClient && window.appwriteRealtime) {
             this.databases = window.appwriteDatabases;
             this.client = window.appwriteClient;
+            this.realtime = window.appwriteRealtime;
 
             // Only initialize if user is logged in
             if (authManager.currentUser) {
@@ -35,15 +37,16 @@ class ChatManager {
         try {
             // Fetch channels from Appwrite
             // Fetch channels from Appwrite
-            const response = await this.databases.listRows({
-                databaseId: APPWRITE_CONFIG.databaseId,
-                tableId: APPWRITE_CONFIG.collections.channels
-            });
+            // Fetch channels from Appwrite
+            const response = await this.databases.listDocuments(
+                APPWRITE_CONFIG.databaseId,
+                APPWRITE_CONFIG.collections.channels
+            );
 
             this.channels = {}; // Reset local cache
 
-            if (response.rows.length > 0) {
-                response.rows.forEach(doc => {
+            if (response.documents.length > 0) {
+                response.documents.forEach(doc => {
                     let members = [];
                     try {
                         members = typeof doc.members === 'string' ? JSON.parse(doc.members) : doc.members || [];
@@ -87,17 +90,17 @@ class ChatManager {
     async loadMessages(channelId) {
         try {
             const { Query } = window.Appwrite;
-            const response = await this.databases.listRows({
-                databaseId: APPWRITE_CONFIG.databaseId,
-                tableId: APPWRITE_CONFIG.collections.messages,
-                queries: [
+            const response = await this.databases.listDocuments(
+                APPWRITE_CONFIG.databaseId,
+                APPWRITE_CONFIG.collections.messages,
+                [
                     Query.equal('channelId', channelId),
                     Query.orderDesc('timestamp'),
                     Query.limit(50)
                 ]
-            });
+            );
 
-            this.messages[channelId] = response.rows.reverse().map(doc => ({
+            this.messages[channelId] = response.documents.reverse().map(doc => ({
                 id: doc.$id,
                 author: doc.author,
                 authorName: doc.authorName,
@@ -136,12 +139,14 @@ class ChatManager {
                 editedAt: null
             };
 
-            await this.databases.createRow({
-                databaseId: APPWRITE_CONFIG.databaseId,
-                tableId: APPWRITE_CONFIG.collections.messages,
-                rowId: 'unique()',
-                data: messageData
-            });
+            await this.databases.createDocument(
+                APPWRITE_CONFIG.databaseId,
+                APPWRITE_CONFIG.collections.messages,
+                window.AppwriteID.unique(),
+                messageData
+            );
+
+            console.log('✅ Message sent successfully (HTTP 201):', messageData);
 
             // Optimistic update is not strictly needed with fast realtime, 
             // but we rely on realtime subscription to add it to the list.
@@ -176,12 +181,12 @@ class ChatManager {
                 createdAt: new Date().toISOString()
             };
 
-            await this.databases.createRow({
-                databaseId: APPWRITE_CONFIG.databaseId,
-                tableId: APPWRITE_CONFIG.collections.channels,
-                rowId: 'unique()',
-                data: channelData
-            });
+            await this.databases.createDocument(
+                APPWRITE_CONFIG.databaseId,
+                APPWRITE_CONFIG.collections.channels,
+                window.AppwriteID.unique(),
+                channelData
+            );
 
             return { success: true, message: 'Channel created' };
 
@@ -220,15 +225,34 @@ class ChatManager {
         }
 
         try {
-            const unsubscribe = this.client.subscribe(
-                `tablesdb.${APPWRITE_CONFIG.databaseId}.tables.${APPWRITE_CONFIG.collections.messages}.rows`,
+            // Channel subscription: databases.<DB_ID>.collections.<COLL_ID>.documents
+            const channelString = `databases.${APPWRITE_CONFIG.databaseId}.collections.${APPWRITE_CONFIG.collections.messages}.documents`;
+
+            console.log('🔌 Generated Channel String:', channelString);
+
+            // DEBUG: Subscribe to account channel to test basic connectivity
+            this.realtime.subscribe('account', (response) => {
+                console.log('👤 DEBUG: Account Event Received:', response);
+            });
+
+            const unsubscribe = this.realtime.subscribe(
+                channelString,
                 (response) => {
-                    const event = response.events[0];
+                    const events = response.events;
                     const payload = response.payload;
+                    console.log('📨 Realtime Event Received:', events[0]);
+                    console.log('📨 Message Payload:', payload);
+                    console.log('🔍 Event Channel Source:', response.channels);
 
                     // Filter messages by channel
+                    // Standard Appwrite uses 'documents' instead of 'rows', checking both
                     if (payload.channelId === channelId) {
-                        if (event.includes('create')) {
+                        // Check for event types
+                        const isCreate = events.some(e => e.endsWith('.create'));
+                        const isUpdate = events.some(e => e.endsWith('.update'));
+                        const isDelete = events.some(e => e.endsWith('.delete'));
+
+                        if (isCreate) {
                             if (!this.messages[channelId]) this.messages[channelId] = [];
 
                             // Adapt payload to message structure
@@ -244,9 +268,13 @@ class ChatManager {
                                 editedAt: payload.editedAt
                             };
 
-                            this.messages[channelId].push(newMessage);
+                            // Avoid duplicates
+                            if (!this.messages[channelId].find(m => m.id === newMessage.id)) {
+                                this.messages[channelId].push(newMessage);
+                                console.log('📥 New Message Added to Chat:', newMessage.text, 'by', newMessage.authorName);
+                            }
 
-                        } else if (event.includes('update')) {
+                        } else if (isUpdate) {
                             // Handle update
                             const index = this.messages[channelId]?.findIndex(m => m.id === payload.$id);
                             if (index !== -1 && index !== undefined) {
@@ -257,7 +285,7 @@ class ChatManager {
                                     editedAt: payload.editedAt
                                 };
                             }
-                        } else if (event.includes('delete')) {
+                        } else if (isDelete) {
                             // Handle delete
                             this.messages[channelId] = this.messages[channelId].filter(m => m.id !== payload.$id);
                         }
@@ -283,13 +311,22 @@ class ChatManager {
         if (this.subscriptions['channels']) return;
 
         try {
-            const unsubscribe = this.client.subscribe(
-                `tablesdb.${APPWRITE_CONFIG.databaseId}.tables.${APPWRITE_CONFIG.collections.channels}.rows`,
-                (response) => {
-                    const event = response.events[0];
-                    const payload = response.payload;
+            const channelString = `databases.${APPWRITE_CONFIG.databaseId}.collections.${APPWRITE_CONFIG.collections.channels}.documents`;
 
-                    if (event.includes('create') || event.includes('update')) {
+            console.log('🔌 Generated Channel String (Channels):', channelString);
+
+            const unsubscribe = this.realtime.subscribe(
+                channelString,
+                (response) => {
+                    const events = response.events;
+                    const payload = response.payload;
+                    console.log('📡 Realtime Channel Event:', events[0], payload);
+
+                    const isCreate = events.some(e => e.endsWith('.create'));
+                    const isUpdate = events.some(e => e.endsWith('.update'));
+                    const isDelete = events.some(e => e.endsWith('.delete'));
+
+                    if (isCreate || isUpdate) {
                         let members = [];
                         try {
                             members = typeof payload.members === 'string' ? JSON.parse(payload.members) : payload.members || [];
@@ -308,7 +345,7 @@ class ChatManager {
                             createdAt: payload.createdAt
                         };
                         renderChannels();
-                    } else if (event.includes('delete')) {
+                    } else if (isDelete) {
                         delete this.channels[payload.name];
                         renderChannels();
                     }
