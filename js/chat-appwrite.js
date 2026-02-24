@@ -625,6 +625,24 @@ function toggleChannelInfo() {
     showNotification('Channel info coming soon!', 'info');
 }
 
+// Toggle user menu
+function toggleUserMenu() {
+    const menu = document.getElementById('userMenu');
+    menu.classList.toggle('active');
+}
+
+// Close user menu when clicking outside
+document.addEventListener('click', (e) => {
+    const menu = document.getElementById('userMenu');
+    const fab = document.getElementById('fabMenu');
+    
+    if (menu.classList.contains('active') && 
+        !menu.contains(e.target) && 
+        !fab.contains(e.target)) {
+        menu.classList.remove('active');
+    }
+});
+
 // Setup event listeners
 function setupEventListeners() {
     document.getElementById('messageInput')?.addEventListener('keypress', (e) => {
