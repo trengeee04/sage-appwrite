@@ -35,9 +35,12 @@ app.use((err, req, res, next) => {
     });
 });
 
-// Start server
-app.listen(PORT, () => {
-    console.log(`✅ SAGE ChatApp server running on http://localhost:${PORT}`);
-    console.log(`🔗 Open http://localhost:${PORT} in your browser`);
-    console.log(`📊 Health check: http://localhost:${PORT}/health`);
-});
+// // Start server
+// app.listen(PORT, () => {
+//     console.log(`✅ SAGE ChatApp server running on http://localhost:${PORT}`);
+//     console.log(`🔗 Open http://localhost:${PORT} in your browser`);
+//     console.log(`📊 Health check: http://localhost:${PORT}/health`);
+// });
+
+
+module.exports = app;
