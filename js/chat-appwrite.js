@@ -35,8 +35,9 @@ class ChatManager {
     // Initialize default channels in Appwrite
     async initializeDefaultChannels() {
         try {
-            // Fetch channels from Appwrite
-            // Fetch channels from Appwrite
+            // Show loading shimmers
+            renderChannelShimmers();
+
             // Fetch channels from Appwrite
             const response = await this.databases.listDocuments(
                 APPWRITE_CONFIG.databaseId,
@@ -47,12 +48,8 @@ class ChatManager {
 
             if (response.documents.length > 0) {
                 response.documents.forEach(doc => {
-                    let members = [];
-                    try {
-                        members = typeof doc.members === 'string' ? JSON.parse(doc.members) : doc.members || [];
-                    } catch (e) {
-                        members = [];
-                    }
+                    // Members is now an array of relationship objects or IDs
+                    let members = Array.isArray(doc.members) ? doc.members.map(m => m.$id || m) : [];
 
                     this.channels[doc.name] = {
                         id: doc.$id,
@@ -61,6 +58,7 @@ class ChatManager {
                         icon: doc.icon || 'fa-hash',
                         description: doc.description || '',
                         type: doc.type || 'channel',
+                        creator: doc.creator,
                         members: members,
                         createdAt: doc.createdAt
                     };
@@ -89,6 +87,9 @@ class ChatManager {
     // Load messages from Appwrite
     async loadMessages(channelId) {
         try {
+            // Show Shimmers
+            renderMessageShimmers();
+
             const { Query } = window.Appwrite;
             const response = await this.databases.listDocuments(
                 APPWRITE_CONFIG.databaseId,
@@ -177,7 +178,7 @@ class ChatManager {
                 description: description,
                 type: 'channel',
                 creator: currentUser.id,
-                members: JSON.stringify([currentUser.id]), // Store as JSON string
+                members: [currentUser.id], // Send array of document IDs for relationship
                 createdAt: new Date().toISOString()
             };
 
@@ -201,9 +202,94 @@ class ChatManager {
         return Object.values(this.channels).filter(ch => ch.type === 'channel');
     }
 
+    // Get channels the user is a member of
+    getJoinedChannels() {
+        const userId = authManager.currentUser?.id;
+        return this.getAllChannels().filter(ch => ch.members.includes(userId) || ch.creator === userId);
+    }
+
+    // Get channels the user is NOT a member of
+    getOtherChannels() {
+        const userId = authManager.currentUser?.id;
+        return this.getAllChannels().filter(ch => !ch.members.includes(userId) && ch.creator !== userId);
+    }
+
     // Get channel by ID
     getChannel(channelId) {
         return Object.values(this.channels).find(ch => ch.id === channelId);
+    }
+
+    // Leave a channel
+    async leaveChannel(channelId) {
+        try {
+            const userId = authManager.currentUser?.id;
+            if (!userId) return { success: false, message: 'Not logged in' };
+
+            const channel = this.getChannel(channelId);
+            if (!channel) return { success: false, message: 'Channel not found' };
+
+            // Cannot leave if you are the creator
+            if (channel.creator === userId) {
+                return { success: false, message: 'Creators cannot leave their own channel. Delete it instead.' };
+            }
+
+            // Relationship arrays in Appwrite return object IDs when updated
+            const currentMembersIds = channel.members.map(m => m.$id || m);
+
+            if (!currentMembersIds.includes(userId)) {
+                return { success: false, message: 'You are not a member of this channel' };
+            }
+
+            const updatedMembers = currentMembersIds.filter(id => id !== userId);
+
+            await this.databases.updateDocument(
+                APPWRITE_CONFIG.databaseId,
+                APPWRITE_CONFIG.collections.channels,
+                channelId,
+                {
+                    members: updatedMembers
+                }
+            );
+
+            return { success: true, message: 'Successfully left channel.' };
+        } catch (error) {
+            console.error('Leaving channel error:', error);
+            return { success: false, message: 'Could not leave channel.' };
+        }
+    }
+
+    // Delete a channel
+    async deleteChannel(channelId) {
+        try {
+            const userId = authManager.currentUser?.id;
+            if (!userId) return { success: false, message: 'Not logged in' };
+
+            const channel = this.getChannel(channelId);
+            if (!channel) return { success: false, message: 'Channel not found' };
+
+            if (channel.creator !== userId) {
+                return { success: false, message: 'Only the creator can delete this channel' };
+            }
+
+            await this.databases.deleteDocument(
+                APPWRITE_CONFIG.databaseId,
+                APPWRITE_CONFIG.collections.channels,
+                channelId
+            );
+
+            // Clean up messages (optional in Appwrite if using Set Null / Cascade relationships, but manual cleanup is safe)
+            /*
+            const messages = this.getChannelMessages(channelId);
+            for (let msg of messages) {
+                await this.databases.deleteDocument(APPWRITE_CONFIG.databaseId, APPWRITE_CONFIG.collections.messages, msg.id);
+            }
+            */
+
+            return { success: true, message: 'Channel deleted successfully.' };
+        } catch (error) {
+            console.error('Deleting channel error:', error);
+            return { success: false, message: 'Could not delete channel. Check permissions.' };
+        }
     }
 
     // Search channels
@@ -214,6 +300,31 @@ class ChatManager {
             ch.name.includes(lowerQuery) ||
             (ch.description && ch.description.toLowerCase().includes(lowerQuery))
         );
+    }
+
+    // Join a channel
+    async joinChannel(channelId) {
+        try {
+            const channel = this.getChannel(channelId);
+            if (!channel) throw new Error('Channel not found');
+
+            const currentUser = authManager.currentUser;
+            if (channel.members.includes(currentUser.id)) return { success: true }; // Already joined
+
+            const updatedMembers = [...channel.members, currentUser.id];
+
+            await this.databases.updateDocument(
+                APPWRITE_CONFIG.databaseId,
+                APPWRITE_CONFIG.collections.channels,
+                channelId,
+                { members: updatedMembers }
+            );
+
+            return { success: true, message: 'Joined channel successfully' };
+        } catch (error) {
+            console.error('❌ Error joining channel:', error);
+            return { success: false, message: error.message };
+        }
     }
 
     // Subscribe to real-time messages
@@ -327,12 +438,8 @@ class ChatManager {
                     const isDelete = events.some(e => e.endsWith('.delete'));
 
                     if (isCreate || isUpdate) {
-                        let members = [];
-                        try {
-                            members = typeof payload.members === 'string' ? JSON.parse(payload.members) : payload.members || [];
-                        } catch (e) {
-                            members = [];
-                        }
+                        // Members is now an array of relationship objects or IDs
+                        let members = Array.isArray(payload.members) ? payload.members.map(m => m.$id || m) : [];
 
                         this.channels[payload.name] = {
                             id: payload.$id,
@@ -341,6 +448,7 @@ class ChatManager {
                             icon: payload.icon || 'fa-hash',
                             description: payload.description || '',
                             type: payload.type || 'channel',
+                            creator: payload.creator,
                             members: members,
                             createdAt: payload.createdAt
                         };
@@ -391,32 +499,108 @@ async function initializeChat() {
     showNotification(`Welcome, ${authManager.currentUser.name}!`, 'success');
 }
 
+// ============================================
+// Shimmer Loading UI
+// ============================================
+
+function renderChannelShimmers() {
+    const list = document.getElementById('channelsList');
+    if (list) list.innerHTML = Array(3).fill('<div class="shimmer-wrapper shimmer-channel"></div>').join('');
+
+    const otherList = document.getElementById('otherChannelsList');
+    if (otherList) otherList.innerHTML = Array(3).fill('<div class="shimmer-wrapper shimmer-channel"></div>').join('');
+}
+
+function renderMessageShimmers() {
+    const area = document.getElementById('messagesArea');
+    if (area) area.innerHTML = Array(5).fill(`
+        <div class="shimmer-message">
+            <div class="shimmer-wrapper shimmer-avatar"></div>
+            <div class="shimmer-lines">
+                <div class="shimmer-wrapper shimmer-line short"></div>
+                <div class="shimmer-wrapper shimmer-line long"></div>
+                <div class="shimmer-wrapper shimmer-line medium"></div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderMemberShimmers() {
+    const list = document.getElementById('membersList');
+    if (list) list.innerHTML = Array(5).fill(`
+         <div class="shimmer-member">
+            <div class="shimmer-wrapper shimmer-avatar"></div>
+            <div class="shimmer-lines">
+                <div class="shimmer-wrapper shimmer-line medium"></div>
+                <div class="shimmer-wrapper shimmer-line short"></div>
+            </div>
+        </div>
+     `).join('');
+}
+
 // Render all channels in sidebar
 function renderChannels() {
     const channelsList = document.getElementById('channelsList');
-    const channels = chatManager.getAllChannels();
+    // We will dynamically create a container for "Other Channels" if it doesn't exist
+    let otherChannelsList = document.getElementById('otherChannelsList');
 
-    channelsList.innerHTML = '';
+    if (!otherChannelsList) {
+        // Find the sidebar to append the new section after Your Channels
+        const channelsSection = channelsList.parentElement;
 
-    if (channels.length === 0) {
-        channelsList.innerHTML = '<div style="padding: 10px; color: #72767d; font-size: 0.9em;">No channels found.</div>';
+        const otherSection = document.createElement('div');
+        otherSection.className = 'channels-section';
+        otherSection.innerHTML = `
+            <h3 class="section-title">Other Channels</h3>
+            <div id="otherChannelsList" class="channels-list"></div>
+        `;
+        channelsSection.parentElement.insertBefore(otherSection, channelsSection.nextSibling);
+        otherChannelsList = document.getElementById('otherChannelsList');
+
+        // Update the title of the original section to be clearer
+        channelsSection.querySelector('.section-title').textContent = 'Your Channels';
     }
 
-    channels.forEach(channel => {
-        const button = document.createElement('button');
-        button.className = 'channel-item';
-        // Add active class if it matches current channel
-        if (chatManager.currentChannel === channel.id) {
-            button.classList.add('active');
-        }
+    const joinedChannels = chatManager.getJoinedChannels();
+    const otherChannels = chatManager.getOtherChannels();
 
-        button.innerHTML = `
-            <i class="fas ${channel.icon}"></i>
-            <span>${channel.name}</span>
-        `;
-        button.onclick = () => selectChannel(channel.id);
-        channelsList.appendChild(button);
-    });
+    // Render Joined Channels
+    channelsList.innerHTML = '';
+    if (joinedChannels.length === 0) {
+        channelsList.innerHTML = '<div style="padding: 10px; color: #72767d; font-size: 0.9em;">Join a channel to start.</div>';
+    } else {
+        joinedChannels.forEach(channel => {
+            const button = document.createElement('button');
+            button.className = 'channel-item';
+            if (chatManager.currentChannel === channel.id) button.classList.add('active');
+
+            button.innerHTML = `
+                <i class="fas ${channel.icon}"></i>
+                <span>${channel.name}</span>
+            `;
+            button.onclick = () => selectChannel(channel.id);
+            channelsList.appendChild(button);
+        });
+    }
+
+    // Render Other Channels
+    otherChannelsList.innerHTML = '';
+    if (otherChannels.length === 0) {
+        otherChannelsList.innerHTML = '<div style="padding: 10px; color: #72767d; font-size: 0.9em;">No other channels found.</div>';
+    } else {
+        otherChannels.forEach(channel => {
+            const button = document.createElement('button');
+            button.className = 'channel-item other-channel'; // Specific class for styling if needed
+            if (chatManager.currentChannel === channel.id) button.classList.add('active');
+
+            button.innerHTML = `
+                <i class="fas ${channel.icon}" style="opacity: 0.5;"></i>
+                <span style="opacity: 0.7;">${channel.name}</span>
+            `;
+            button.onclick = () => selectChannel(channel.id);
+            otherChannelsList.appendChild(button);
+        });
+    }
 }
 
 // Select channel and load messages
@@ -442,17 +626,133 @@ async function selectChannel(channelId) {
         document.getElementById('channelName').textContent = '# ' + channel.displayName;
         document.getElementById('channelDescription').textContent = channel.description;
 
-        // Load messages
-        await chatManager.loadMessages(channelId);
+        // Check membership to show/hide input
+        const userId = authManager.currentUser?.id;
+        const isMember = channel.members.includes(userId) || channel.creator === userId;
+        const inputArea = document.querySelector('.message-input-area');
 
-        // Subscribe to real-time updates
-        chatManager.subscribeToMessages(channelId);
+        if (!isMember) {
+            // Hide input, show a join button placeholder in the message area instead of messages
+            inputArea.style.display = 'none';
+            // We don't subscribe to messages if they aren't a member (optional, but good for privacy)
+            renderJoinPrompt(channel);
+            return;
+        } else {
+            inputArea.style.display = 'flex'; // Restore input area
 
-        // Render messages
-        renderMessages();
+            // Load messages
+            await chatManager.loadMessages(channelId);
+
+            // Subscribe to real-time updates
+            chatManager.subscribeToMessages(channelId);
+
+            // Render messages
+            renderMessages();
+        }
     } catch (error) {
         console.error('Selecting channel error:', error);
         showNotification('Error loading channel', 'error');
+    }
+}
+
+// Render join prompt instead of messages
+function renderJoinPrompt(channel) {
+    const messagesArea = document.getElementById('messagesArea');
+
+    messagesArea.innerHTML = `
+        <div class="messages-welcome">
+            <div class="welcome-icon">
+                <i class="fas ${channel.icon}"></i>
+            </div>
+            <h2>You are previewing #${channel.name}</h2>
+            <p>${channel.description || 'Join this channel to see history and start chatting!'}</p>
+            <button type="button" class="btn-primary" style="margin-top: 20px;" onclick="joinCurrentChannel()">
+                Join Channel
+            </button>
+        </div>
+    `;
+}
+
+// Global function to trigger joining the currently selected channel
+async function joinCurrentChannel() {
+    const channelId = chatManager.currentChannel;
+    if (!channelId) return;
+
+    showLoading(true);
+    const result = await chatManager.joinChannel(channelId);
+    showLoading(false);
+
+    if (result.success) {
+        showNotification(result.message, 'success');
+        // Manually force a re-select to kickstart message loading immediately
+        selectChannel(channelId);
+    } else {
+        showNotification(result.message, 'error');
+    }
+}
+
+// Global function to leave the current channel
+async function leaveCurrentChannel() {
+    const channelId = chatManager.currentChannel;
+    if (!channelId) return;
+
+    if (!confirm('Are you sure you want to leave this channel?')) return;
+
+    showLoading(true);
+    const result = await chatManager.leaveChannel(channelId);
+    showLoading(false);
+
+    if (result.success) {
+        showNotification(result.message, 'success');
+        toggleMemberList(); // Close member list
+
+        // Select first available channel or clear chat area
+        const joinedChannels = chatManager.getJoinedChannels();
+        if (joinedChannels.length > 0) {
+            selectChannel(joinedChannels[0].id);
+        } else {
+            // Re-render the "Join" prompt for the detached channel
+            selectChannel(channelId);
+        }
+    } else {
+        showNotification(result.message, 'error');
+    }
+}
+
+// Global function to delete the current channel
+async function deleteCurrentChannel() {
+    const channelId = chatManager.currentChannel;
+    if (!channelId) return;
+
+    if (!confirm('Are you ABSOLUTELY sure you want to delete this channel? This cannot be undone.')) return;
+
+    showLoading(true);
+    const result = await chatManager.deleteChannel(channelId);
+    showLoading(false);
+
+    if (result.success) {
+        showNotification(result.message, 'success');
+        toggleMemberList(); // Close member list
+
+        // Reset state since it's deleted. Appwrite realtime should trigger channels refresh.
+        chatManager.currentChannel = null;
+        document.getElementById('channelName').textContent = 'Select a channel';
+        document.getElementById('channelDescription').textContent = '';
+        document.getElementById('messagesArea').innerHTML = `
+            <div class="messages-welcome">
+                <div class="welcome-icon">
+                    <i class="fas fa-comments"></i>
+                </div>
+                <h2>Channel Deleted</h2>
+                <p>Select another channel to start chatting</p>
+            </div>
+        `;
+        document.querySelector('.message-input-area').style.display = 'none';
+
+        const joinedChannels = chatManager.getJoinedChannels();
+        if (joinedChannels.length > 0) selectChannel(joinedChannels[0].id);
+    } else {
+        showNotification(result.message, 'error');
     }
 }
 
@@ -559,25 +859,82 @@ function toggleMemberList() {
 // Render members list (Available users in the system)
 async function renderMembers() {
     const membersList = document.getElementById('membersList');
-    // For now, load all users. In a real app, this should be channel members.
-    // However, checking channel members requires more complex permissions/queries.
-    // We will list all users for demonstration.
+    const headerTitle = document.querySelector('#rightSidebar .sidebar-header h2');
+
+    const currentChannelId = chatManager.currentChannel;
+    if (!currentChannelId) return;
+
+    const channel = chatManager.getChannel(currentChannelId);
+    if (!channel) return;
+
+    // Get all member IDs for this channel (creator + members array)
+    const membersIds = channel.members.map(m => m.$id || m); // Extract IDs from Appwrite relationship objects
+    if (channel.creator && !membersIds.includes(channel.creator)) {
+        membersIds.push(channel.creator);
+    }
+    const channelMemberIds = new Set(membersIds);
+
+    // Show shimmers while loading
+    renderMemberShimmers();
+
+    // In a real production app, this should be a queried search, but here we can load all and filter
     const allUsers = await authManager.getAllUsers();
+
+    // Filter users to only include members of the current channel
+    const channelMembers = allUsers.filter(user => channelMemberIds.has(user.id));
+
+    // Update member count in the header
+    if (headerTitle) {
+        headerTitle.textContent = `Members (${channelMembers.length})`;
+    }
 
     membersList.innerHTML = '';
 
-    allUsers.forEach(user => {
+    if (channelMembers.length === 0) {
+        membersList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-tertiary); font-size: 14px;">No members found</div>';
+        return;
+    }
+
+    channelMembers.forEach(user => {
         const memberEl = document.createElement('div');
         memberEl.className = 'member-item';
+
+        // Indicate creator nicely
+        const isCreator = user.id === channel.creator;
+        const creatorBadge = isCreator ? '<i class="fas fa-crown" style="color: var(--warning-color); font-size: 10px; margin-left: 5px;" title="Channel Creator"></i>' : '';
+
         memberEl.innerHTML = `
             <div class="member-avatar">${user.avatar}</div>
             <div class="member-info">
-                <h4>${user.name}</h4>
+                <h4>${user.name}${creatorBadge}</h4>
                 <p class="member-status">${user.status || 'offline'}</p>
             </div>
         `;
         membersList.appendChild(memberEl);
     });
+
+    // Render Actions for user
+    const actionsContainer = document.getElementById('channelActions');
+    if (actionsContainer) {
+        actionsContainer.innerHTML = '';
+        const currentUserId = authManager.currentUser?.id;
+
+        if (channel.creator === currentUserId) {
+            // Creator can delete the channel, but not "leave" it directly
+            actionsContainer.innerHTML = `
+                <button type="button" class="btn-primary flex-fill" style="background: var(--danger-color); width: 100%; border-radius: 6px; border: none; padding: 10px; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; transition: transform 0.2s;" onclick="deleteCurrentChannel()" onmouseover="this.style.opacity='0.9';" onmouseout="this.style.opacity='1';">
+                    <i class="fas fa-trash"></i> Delete Channel
+                </button>
+            `;
+        } else if (channelMemberIds.has(currentUserId)) {
+            // Normal member can leave
+            actionsContainer.innerHTML = `
+                <button type="button" class="btn-primary flex-fill" style="background: transparent; border: 1px solid var(--danger-color); width: 100%; border-radius: 6px; padding: 10px; color: var(--danger-color); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; transition: all 0.2s;" onclick="leaveCurrentChannel()" onmouseover="this.style.background='rgba(240, 71, 71, 0.1)'; this.style.transform='translateY(-1px)';" onmouseout="this.style.background='transparent'; this.style.transform='translateY(0)';">
+                    <i class="fas fa-sign-out-alt"></i> Leave Channel
+                </button>
+            `;
+        }
+    }
 }
 
 // Utility function to escape HTML
@@ -635,9 +992,9 @@ function toggleUserMenu() {
 document.addEventListener('click', (e) => {
     const menu = document.getElementById('userMenu');
     const fab = document.getElementById('fabMenu');
-    
-    if (menu.classList.contains('active') && 
-        !menu.contains(e.target) && 
+
+    if (menu.classList.contains('active') &&
+        !menu.contains(e.target) &&
         !fab.contains(e.target)) {
         menu.classList.remove('active');
     }

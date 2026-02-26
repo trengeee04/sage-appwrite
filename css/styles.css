@@ -1199,6 +1199,88 @@ body {
     animation: spin 1s linear infinite;
 }
 
+/* ============================================
+   SHIMMER LOADING SKELETONS
+   ============================================ */
+
+.shimmer-wrapper {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--hover-bg);
+    border-radius: 4px;
+}
+
+.shimmer-wrapper::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 200%;
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.05) 50%,
+        transparent 100%
+    );
+    animation: shimmer 1.5s infinite linear;
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(100%); }
+}
+
+.shimmer-channel {
+    height: 36px;
+    margin: 4px 8px;
+    border-radius: 6px;
+    background-color: rgba(255,255,255,0.03);
+}
+
+.shimmer-message {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+}
+
+.shimmer-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background-color: rgba(255,255,255,0.03);
+    flex-shrink: 0;
+}
+
+.shimmer-lines {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    justify-content: center;
+}
+
+.shimmer-line {
+    height: 10px;
+    background-color: rgba(255,255,255,0.03);
+    border-radius: 4px;
+}
+
+.shimmer-line.short { width: 30%; }
+.shimmer-line.medium { width: 60%; }
+.shimmer-line.long { width: 90%; }
+
+.shimmer-member {
+    display: flex;
+    gap: 12px;
+    padding: 10px;
+    align-items: center;
+}
+.shimmer-member .shimmer-avatar {
+    width: 32px;
+    height: 32px;
+}
+
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
