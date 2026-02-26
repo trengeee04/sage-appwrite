@@ -61,7 +61,6 @@ async function createCollectionsIfNeeded() {
                     { key: 'description', type: 'string', size: 1000 },
                     { key: 'type', type: 'string', size: 50 },
                     { key: 'creator', type: 'string', size: 255 },
-                    { key: 'members', type: 'string', size: 5000 },
                     { key: 'createdAt', type: 'datetime' }
                 ]
             },
