@@ -284,11 +284,21 @@ function showAuthContainer(show) {
     loadingSpinner.classList.remove('active');
 
     if (show) {
-        authContainer.classList.add('active');
-        chatContainer.classList.remove('active');
+        authContainer.style.display = 'flex';
+        setTimeout(() => {
+            authContainer.classList.add('active');
+            chatContainer.classList.remove('active');
+        }, 10);
+        chatContainer.style.display = 'none';
     } else {
-        authContainer.classList.remove('active');
-        chatContainer.classList.add('active');
+        chatContainer.style.display = 'flex';
+        setTimeout(() => {
+            authContainer.classList.remove('active');
+            chatContainer.classList.add('active');
+        }, 10);
+        // Hide auth container from DOM layout to prevent invisible inputs
+        // from triggering browser autofill overlaps
+        setTimeout(() => authContainer.style.display = 'none', 300);
     }
 }
 

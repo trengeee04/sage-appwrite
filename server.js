@@ -19,8 +19,8 @@ app.get('/', (req, res) => {
 
 // Health check
 app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'ok', 
+    res.json({
+        status: 'ok',
         message: 'SAGE ChatApp server is running',
         timestamp: new Date().toISOString()
     });
@@ -29,9 +29,9 @@ app.get('/health', (req, res) => {
 // Error handling
 app.use((err, req, res, next) => {
     console.error('Server error:', err);
-    res.status(500).json({ 
+    res.status(500).json({
         error: 'Internal server error',
-        message: err.message 
+        message: err.message
     });
 });
 
