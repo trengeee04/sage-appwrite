@@ -6,8 +6,8 @@
 // Appwrite Configuration
 const APPWRITE_CONFIG = {
     endpoint: 'https://cloud.appwrite.io/v1',
-    projectId: '6784f3ac003b5c912256',
-    databaseId: '6784f57b0000a70f1b79',
+    projectId: '69fa456f001be6817c49',
+    databaseId: '69fa4646000cce1261cd',
 
     // Collection IDs
     collections: {
